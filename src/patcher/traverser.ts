@@ -1,6 +1,7 @@
 import { Element } from "xml-js";
 
 import { IRenderedParagraphNode, renderParagraphNode } from "./run-renderer";
+import { writeFileSync } from "fs";
 
 export type ElementWrapper = {
     readonly element: Element;
@@ -13,6 +14,7 @@ const elementsToWrapper = (wrapper: ElementWrapper): readonly ElementWrapper[] =
         element: e,
         index: i,
         parent: wrapper,
+        name: e.name as string,
     })) ?? [];
 
 export const traverse = (node: Element): readonly IRenderedParagraphNode[] => {
@@ -42,5 +44,28 @@ export const traverse = (node: Element): readonly IRenderedParagraphNode[] => {
     return renderedParagraphs;
 };
 
-export const findLocationOfText = (node: Element, text: string): readonly IRenderedParagraphNode[] =>
-    traverse(node).filter((p) => p.text.includes(text));
+let previous: string = '';
+let index = 0;
+
+export const findLocationOfText = (node: Element, text: string): readonly IRenderedParagraphNode[] => {
+    const filterCbk = (p: IRenderedParagraphNode) => p.text.includes(text);
+    const res = traverse(node).filter(filterCbk);
+
+    const json = JSON.stringify(node, null, "\t");
+    if (json !== previous && res.length > 0) {
+        ++index;
+        previous = json;
+    }
+    return res;
+}
+
+export const findLocationOfRegex = (node: Element, regex: RegExp): readonly IRenderedParagraphNode[] => {
+    const filterCbk = (p: IRenderedParagraphNode) => regex.test(p.text);
+    const res = traverse(node).filter(filterCbk);
+
+    const json = JSON.stringify(node, null, "\t");
+    if (json.includes('Наименование')) {
+        writeFileSync('./out.json', json);
+    }
+    return res;
+};

@@ -7,6 +7,7 @@ export type IRenderedParagraphNode = {
     readonly runs: readonly IRenderedRunNode[];
     readonly index: number;
     readonly pathToParagraph: readonly number[];
+    readonly name: string;
 };
 
 type StartAndEnd = {
@@ -36,6 +37,7 @@ export const renderParagraphNode = (node: ElementWrapper): IRenderedParagraphNod
             runs: [],
             index: -1,
             pathToParagraph: [],
+            name: '',
         };
     }
 
@@ -59,6 +61,7 @@ export const renderParagraphNode = (node: ElementWrapper): IRenderedParagraphNod
         runs,
         index: node.index,
         pathToParagraph: buildNodePath(node),
+        name: node.element.name ?? '',
     };
 };
 
@@ -79,15 +82,15 @@ const renderRunNode = (node: Element, index: number, currentRunStringIndex: numb
         .map((element, i: number) =>
             element.name === "w:t" && element.elements && element.elements.length > 0
                 ? {
-                      text: element.elements[0].text?.toString() ?? "",
-                      index: i,
-                      start: currentTextStringIndex,
-                      end: (() => {
-                          // Side effect
-                          currentTextStringIndex += (element.elements[0].text?.toString() ?? "").length - 1;
-                          return currentTextStringIndex;
-                      })(),
-                  }
+                    text: element.elements[0].text?.toString() ?? "",
+                    index: i,
+                    start: currentTextStringIndex,
+                    end: (() => {
+                        // Side effect
+                        currentTextStringIndex += (element.elements[0].text?.toString() ?? "").length - 1;
+                        return currentTextStringIndex;
+                    })(),
+                }
                 : undefined,
         )
         .filter((e) => !!e)

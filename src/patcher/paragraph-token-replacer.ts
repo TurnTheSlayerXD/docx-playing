@@ -9,6 +9,8 @@ const ReplaceMode = {
     END: 2,
 } as const;
 
+import { writeFileSync } from "fs";
+
 export const replaceTokenInParagraphElement = ({
     paragraphElement,
     renderedParagraph,
@@ -20,10 +22,13 @@ export const replaceTokenInParagraphElement = ({
     readonly originalText: string;
     readonly replacementText: string;
 }): Element => {
+
     const startIndex = renderedParagraph.text.indexOf(originalText);
     const endIndex = startIndex + originalText.length - 1;
+    console.log({ 'indexed': renderedParagraph.text.substring(startIndex, endIndex), 'original': renderedParagraph.text });
 
     let replaceMode: (typeof ReplaceMode)[keyof typeof ReplaceMode] = ReplaceMode.START;
+    // writeFileSync('before.json', JSON.stringify(paragraphElement));
 
     for (const run of renderedParagraph.runs) {
         for (const { text, index, start, end } of run.parts) {
@@ -65,6 +70,7 @@ export const replaceTokenInParagraphElement = ({
             }
         }
     }
+    writeFileSync('after.json', JSON.stringify(paragraphElement));
 
     return paragraphElement;
 };
@@ -72,6 +78,5 @@ export const replaceTokenInParagraphElement = ({
 const patchTextElement = (element: Element, text: string): Element => {
     // eslint-disable-next-line functional/immutable-data
     element.elements = createTextElementContents(text);
-
     return element;
 };

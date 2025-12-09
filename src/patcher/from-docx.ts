@@ -17,6 +17,7 @@ import { appendContentType } from "./content-types-manager";
 import { appendRelationship, getNextRelationshipIndex } from "./relationship-manager";
 import { replacer } from "./replacer";
 import { toJson } from "./util";
+import { writeFileSync } from "fs";
 
 // eslint-disable-next-line functional/prefer-readonly-type
 export type InputDataType = Buffer | string | number[] | Uint8Array | ArrayBuffer | Blob | NodeJS.ReadableStream | JSZip;
@@ -58,7 +59,7 @@ export type PatchDocumentOptions<T extends PatchDocumentOutputType = PatchDocume
     readonly placeholderDelimiters?: Readonly<{
         readonly start: string;
         readonly end: string;
-    }>;
+    }> | RegExp;
     readonly recursive?: boolean;
 };
 
@@ -78,6 +79,8 @@ const compareByteArrays = (a: Uint8Array, b: Uint8Array): boolean => {
     return true;
 };
 
+
+let tr_index = 0;
 export const patchDocument = async <T extends PatchDocumentOutputType = PatchDocumentOutputType>({
     outputType,
     data,
@@ -161,20 +164,48 @@ export const patchDocument = async <T extends PatchDocumentOutputType = PatchDoc
             };
             contexts.set(key, context);
 
-            if (!placeholderDelimiters?.start.trim() || !placeholderDelimiters?.end.trim()) {
+            if (!(placeholderDelimiters instanceof RegExp) && (!placeholderDelimiters?.start.trim() || !placeholderDelimiters?.end.trim())) {
                 throw new Error("Both start and end delimiters must be non-empty strings.");
             }
 
-            const { start, end } = placeholderDelimiters;
 
-            for (const [patchKey, patchValue] of Object.entries(patches)) {
-                const patchText = `${start}${patchKey}${end}`;
-                // TODO: mutates json. Make it immutable
-                // We need to loop through to catch every occurrence of the patch text
-                // It is possible that the patch text is in the same run
-                // This algorithm is limited to one patch per text run
-                // We break out of the loop once it cannot find any more occurrences
-                // https://github.com/dolanmiu/docx/issues/2267
+            const cycleMany = (patchText: RegExp, patchValueArr: IPatch[]) => {
+                let patch = patchValueArr.map(p => ({
+                    ...p,
+                    children: p.children.map(element => {
+                        if (element instanceof ExternalHyperlink) {
+                            const concreteHyperlink = new ConcreteHyperlink(element.options.children, uniqueId());
+                            // eslint-disable-next-line functional/immutable-data
+                            hyperlinkRelationshipAdditions.push({
+                                key,
+                                hyperlink: {
+                                    id: concreteHyperlink.linkId,
+                                    link: element.options.link,
+                                },
+                            });
+                            return concreteHyperlink;
+                        } else {
+                            return element;
+                        }
+                    }),
+                }));
+
+                while (true) {
+                    const { didFindOccurrence } = replacer({
+                        json,
+                        patch: patch as any,
+                        patchText,
+                        context,
+                        keepOriginalStyles,
+                    });
+                    // What the reason doing that? Once document is patched - it search over patched json again, that takes too long if patched document has big and deep structure.
+                    if (!recursive || !didFindOccurrence) {
+                        break;
+                    }
+                }
+            };
+
+            const cycle = (patchText: string | RegExp, patchValue: IPatch) => {
                 while (true) {
                     const { didFindOccurrence } = replacer({
                         json,
@@ -208,6 +239,20 @@ export const patchDocument = async <T extends PatchDocumentOutputType = PatchDoc
                         break;
                     }
                 }
+            };
+
+            if (!(placeholderDelimiters instanceof RegExp)) {
+                const { start, end } = placeholderDelimiters;
+                for (const [patchKey, patchValue] of Object.entries(patches)) {
+                    const patchText = `${start}${patchKey}${end}`;
+                    cycle(patchText, patchValue);
+                }
+            }
+            else {
+                // for (const p of Object.values(patches)) {
+                //     cycle(placeholderDelimiters, p);
+                // }
+                cycleMany(placeholderDelimiters, Object.values(patches));
             }
 
             const mediaDatas = imageReplacer.getMediaData(JSON.stringify(json), context.file.Media);

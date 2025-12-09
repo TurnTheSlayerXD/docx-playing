@@ -7,8 +7,10 @@ import { IContext, XmlComponent } from "@file/xml-components";
 import { IPatch, PatchType } from "./from-docx";
 import { findRunElementIndexWithToken, splitRunElement } from "./paragraph-split-inject";
 import { replaceTokenInParagraphElement } from "./paragraph-token-replacer";
-import { findLocationOfText } from "./traverser";
+import { findLocationOfRegex, findLocationOfText } from "./traverser";
 import { toJson } from "./util";
+import { IRenderedParagraphNode } from "./run-renderer";
+import { writeFileSync } from "fs";
 
 const formatter = new Formatter();
 
@@ -19,6 +21,68 @@ type IReplacerResult = {
     readonly didFindOccurrence: boolean;
 };
 
+let iter = 0;
+
+function baseProcessParagraph(p: IPatch,
+    renderedParagraph: IRenderedParagraphNode,
+    originalText: string,
+    context: IContext,
+    json: Element,
+    keepOriginalStyles?: boolean,
+) {
+    const textJson = p.children.map((c) => toJson(xml(formatter.format(c as XmlComponent, context)))).map((c) => c.elements![0]);
+
+    switch (p.type) {
+        case PatchType.DOCUMENT: {
+            const parentElement = goToParentElementFromPath(json, renderedParagraph.pathToParagraph);
+            const elementIndex = getLastElementIndexFromPath(renderedParagraph.pathToParagraph);
+            // eslint-disable-next-line functional/immutable-data
+            parentElement.elements!.splice(elementIndex, 1, ...textJson);
+            break;
+        }
+        case PatchType.PARAGRAPH:
+        default: {
+            const paragraphElement = goToElementFromPath(json, renderedParagraph.pathToParagraph);
+            replaceTokenInParagraphElement({
+                paragraphElement,
+                renderedParagraph,
+                originalText: originalText,
+                replacementText: SPLIT_TOKEN,
+            });
+
+            const index = findRunElementIndexWithToken(paragraphElement, SPLIT_TOKEN);
+
+            const runElementToBeReplaced = paragraphElement.elements![index];
+            const { left, right } = splitRunElement(runElementToBeReplaced, SPLIT_TOKEN);
+
+            let newRunElements = textJson;
+            let patchedRightElement = right;
+
+            if (keepOriginalStyles) {
+                const runElementNonTextualElements = runElementToBeReplaced.elements!.filter(
+                    (e) => e.type === "element" && e.name === "w:rPr",
+                );
+
+                newRunElements = textJson.map((e) => ({
+                    ...e,
+                    elements: [...runElementNonTextualElements, ...(e.elements ?? [])],
+                }));
+
+                patchedRightElement = {
+                    ...right,
+                    elements: [...runElementNonTextualElements, ...right.elements!],
+                };
+            }
+
+            // eslint-disable-next-line functional/immutable-data
+            paragraphElement.elements!.splice(index, 1, left, ...newRunElements, patchedRightElement);
+            break;
+        }
+    }
+}
+
+
+let globalPatchIter = 0;
 export const replacer = ({
     json,
     patch,
@@ -27,68 +91,57 @@ export const replacer = ({
     keepOriginalStyles = true,
 }: {
     readonly json: Element;
-    readonly patch: IPatch;
-    readonly patchText: string;
+    readonly patch: IPatch | IPatch[];
+    readonly patchText: string | RegExp;
     readonly context: IContext;
     readonly keepOriginalStyles?: boolean;
 }): IReplacerResult => {
-    const renderedParagraphs = findLocationOfText(json, patchText);
 
-    if (renderedParagraphs.length === 0) {
-        return { element: json, didFindOccurrence: false };
+
+    let processParagraph;
+    if (patch instanceof Array) {
+        processParagraph = (renderedParagraph: IRenderedParagraphNode, originalText: string) => {
+            let p = patch[globalPatchIter++ % patch.length] as any;
+            baseProcessParagraph(p, renderedParagraph, originalText, context, json, keepOriginalStyles);
+        };
+    }
+    else {
+        processParagraph = (renderedParagraph: IRenderedParagraphNode, originalText: string) => {
+            baseProcessParagraph(patch, renderedParagraph, originalText, context, json, keepOriginalStyles);
+        };
     }
 
-    for (const renderedParagraph of renderedParagraphs) {
-        const textJson = patch.children.map((c) => toJson(xml(formatter.format(c as XmlComponent, context)))).map((c) => c.elements![0]);
+    let renderedParagraphs;
+    if (typeof patchText === 'string') {
+        renderedParagraphs = findLocationOfText(json, patchText);
+        if (renderedParagraphs.length === 0) {
+            return { element: json, didFindOccurrence: false };
+        }
 
-        switch (patch.type) {
-            case PatchType.DOCUMENT: {
-                const parentElement = goToParentElementFromPath(json, renderedParagraph.pathToParagraph);
-                const elementIndex = getLastElementIndexFromPath(renderedParagraph.pathToParagraph);
-                // eslint-disable-next-line functional/immutable-data
-                parentElement.elements!.splice(elementIndex, 1, ...textJson);
-                break;
-            }
-            case PatchType.PARAGRAPH:
-            default: {
-                const paragraphElement = goToElementFromPath(json, renderedParagraph.pathToParagraph);
-                replaceTokenInParagraphElement({
-                    paragraphElement,
-                    renderedParagraph,
-                    originalText: patchText,
-                    replacementText: SPLIT_TOKEN,
-                });
-
-                const index = findRunElementIndexWithToken(paragraphElement, SPLIT_TOKEN);
-
-                const runElementToBeReplaced = paragraphElement.elements![index];
-                const { left, right } = splitRunElement(runElementToBeReplaced, SPLIT_TOKEN);
-
-                let newRunElements = textJson;
-                let patchedRightElement = right;
-
-                if (keepOriginalStyles) {
-                    const runElementNonTextualElements = runElementToBeReplaced.elements!.filter(
-                        (e) => e.type === "element" && e.name === "w:rPr",
-                    );
-
-                    newRunElements = textJson.map((e) => ({
-                        ...e,
-                        elements: [...runElementNonTextualElements, ...(e.elements ?? [])],
-                    }));
-
-                    patchedRightElement = {
-                        ...right,
-                        elements: [...runElementNonTextualElements, ...right.elements!],
-                    };
-                }
-
-                // eslint-disable-next-line functional/immutable-data
-                paragraphElement.elements!.splice(index, 1, left, ...newRunElements, patchedRightElement);
-                break;
-            }
+        for (const paragraph of renderedParagraphs) {
+            processParagraph(paragraph, patchText);
         }
     }
+    else {
+        renderedParagraphs = findLocationOfRegex(json, patchText);
+
+        if (renderedParagraphs.length === 0) {
+            return { element: json, didFindOccurrence: false };
+        }
+
+        for (const paragraph of renderedParagraphs) {
+            const matches = [...paragraph.text.matchAll(patchText)].map(t => t[0]);
+            // console.log('paragraph before');
+            // console.log({ text: paragraph.runs, matches });
+            if (matches.length > 0) {
+                processParagraph(paragraph, matches[0]);
+            }
+            // console.log('paragraph after');
+            // console.log({ text: paragraph.runs, matches });
+        }
+    }
+
+
 
     return { element: json, didFindOccurrence: true };
 };

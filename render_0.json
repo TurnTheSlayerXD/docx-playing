@@ -1,0 +1,59 @@
+[
+	{
+		"text": "<<table_heading_1>>",
+		"runs": [
+			{
+				"text": "<<",
+				"parts": [
+					{
+						"text": "<<",
+						"index": 0,
+						"start": 0,
+						"end": 1
+					}
+				],
+				"index": 0,
+				"start": 0,
+				"end": 1
+			},
+			{
+				"text": "table_heading_1",
+				"parts": [
+					{
+						"text": "table_heading_1",
+						"index": 0,
+						"start": 2,
+						"end": 16
+					}
+				],
+				"index": 1,
+				"start": 2,
+				"end": 16
+			},
+			{
+				"text": ">>",
+				"parts": [
+					{
+						"text": ">>",
+						"index": 0,
+						"start": 17,
+						"end": 18
+					}
+				],
+				"index": 2,
+				"start": 17,
+				"end": 18
+			}
+		],
+		"index": 1,
+		"pathToParagraph": [
+			0,
+			1,
+			0,
+			8,
+			2,
+			0,
+			1
+		]
+	}
+]
